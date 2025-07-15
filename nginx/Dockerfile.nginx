@@ -1,0 +1,24 @@
+# Stage 1: Build the React app
+FROM node:18-alpine as build-stage
+WORKDIR /app
+COPY frontend/package*.json .
+RUN npm install
+COPY frontend/. .
+RUN npm run build
+
+# Stage 2: Build Nginx with health check module
+FROM alpine/git as nginx-builder
+RUN apk add --no-cache wget unzip build-base pcre-dev zlib-dev openssl-dev linux-headers     && wget https://github.com/nginx/nginx/archive/refs/heads/master.zip -O nginx.zip     && unzip nginx.zip -d /usr/src/     && mv /usr/src/nginx-master /usr/src/nginx     && wget https://github.com/yaoweibin/ngx_http_upstream_check_module/archive/refs/heads/main.zip -O ngx_http_upstream_check_module.zip     && unzip ngx_http_upstream_check_module.zip -d /usr/src/     && mv /usr/src/ngx_http_upstream_check_module-main /usr/src/ngx_http_upstream_check_module
+
+WORKDIR /usr/src/nginx
+RUN ./auto/configure --with-compat --add-module=/usr/src/ngx_http_upstream_check_module     && make modules
+
+# Stage 3: Serve with custom Nginx build
+FROM nginx:stable-alpine
+COPY --from=nginx-builder /usr/src/nginx/objs/ngx_http_upstream_check_module.so /etc/nginx/modules/
+COPY --from=nginx-builder /usr/src/nginx/objs/nginx /usr/sbin/nginx
+COPY nginx/nginx.conf /etc/nginx/nginx.conf
+COPY --from=build-stage /app/build /usr/share/nginx/html
+
+# Load the module
+RUN echo "load_module modules/ngx_http_upstream_check_module.so;" > /etc/nginx/conf.d/check_module.conf

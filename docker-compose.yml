@@ -1,0 +1,140 @@
+version: '3.8'
+
+services:
+  # Nginx (Balanceador de Carga y Servidor de Estáticos)
+  nginx:
+    build:
+      context: . # Cambiar el contexto a la raíz del proyecto
+      dockerfile: ./nginx/Dockerfile.nginx # Ruta al Dockerfile dentro del nuevo contexto
+    ports:
+      - "80:80" # Exponer el puerto 80 al host
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro # Montar la configuración de Nginx
+    depends_on:
+      - app1
+      - app2
+      - app3
+    networks:
+      - jbs_network
+
+  # Nodos de Aplicación (Node.js API)
+  app1:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    environment:
+      APP_ID: app1
+      DB_HOST: db_primary # Apunta a la DB primaria
+      DB_USER: user
+      DB_NAME: jbs_db
+      DB_PASSWORD: password
+      PORT: 3000
+    networks:
+      - jbs_network
+    depends_on:
+      db_primary:
+        condition: service_healthy
+    # healthcheck: # Health check para Docker Compose (no para Nginx)
+    #   test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 3
+
+  app2:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    environment:
+      APP_ID: app2
+      DB_HOST: db_primary
+      DB_USER: user
+      DB_NAME: jbs_db
+      DB_PASSWORD: password
+      PORT: 3000
+    networks:
+      - jbs_network
+    depends_on:
+      db_primary:
+        condition: service_healthy
+
+  app3:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    environment:
+      APP_ID: app3
+      DB_HOST: db_primary
+      DB_USER: user
+      DB_NAME: jbs_db
+      DB_PASSWORD: password
+      PORT: 3000
+    networks:
+      - jbs_network
+    depends_on:
+      db_primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Base de Datos Primaria (PostgreSQL)
+  db_primary:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_DB: jbs_db
+      POSTGRES_PASSWORD: password
+    volumes:
+      - db_primary_data:/var/lib/postgresql/data # Persistencia de datos
+      - ./db_primary_config/primary-entrypoint.sh:/usr/local/bin/primary-entrypoint.sh
+    entrypoint: ["bash", "/usr/local/bin/primary-entrypoint.sh"]
+    command: ["postgres", "-c", "wal_level=replica", "-c", "max_wal_senders=10", "-c", "max_replication_slots=10"]
+    networks:
+      - jbs_network
+    ports:
+      - "5432:5432" # Exponer para acceso directo si es necesario (no recomendado en prod)
+    healthcheck: # Health check para Docker Compose
+      test: ["CMD-SHELL", "pg_isready -U user -d jbs_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Base de Datos Réplica (PostgreSQL)
+  db_replica:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_DB: jbs_db
+      POSTGRES_PASSWORD: password
+      PGDATA: /var/lib/postgresql/data
+      # Configuración para la replicación (el entrypoint de la imagen de postgres lo maneja)
+      PGPRIMARYHOST: db_primary
+      PGPRIMARYPORT: 5432
+      PGPRIMARYUSER: user
+      PGPRIMARYPASSWORD: password
+      PGPRIMARYDB: jbs_db
+      PGPRIMARYAPPNAME: db_replica
+    volumes:
+      - db_replica_data:/var/lib/postgresql/data
+      - ./db_primary_config/replica-entrypoint.sh:/usr/local/bin/replica-entrypoint.sh
+    entrypoint: ["bash", "/usr/local/bin/replica-entrypoint.sh"]
+    networks:
+      - jbs_network
+    depends_on:
+      - db_primary
+    # No se necesita un comando personalizado, el entrypoint de la imagen de postgres lo maneja
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d jbs_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+networks:
+  jbs_network:
+    driver: bridge
+
+volumes:
+  db_primary_data:
+  db_replica_data:
