@@ -1,8 +1,5 @@
 # JFBS - Joseph Fabian Banking System
 
-This project sets up a banking system with a React frontend, Node.js backend API, PostgreSQL database with replication, and Nginx as a load balancer and static file server, all orchestrated with Docker Compose.
-
-## Project Structure
 
 ```
 .
